@@ -3,6 +3,7 @@ import styled from "styled-components";
 import { useConfigStore } from "./stores";
 import Map from "./map";
 import Panel from "./panel";
+import MapSwitcher from "./panel/mapSwitcher";
 
 const Wrapper = styled.div`
   position: relative;
@@ -18,6 +19,7 @@ export default function Index() {
     <Wrapper>
       <Map />
       <Panel />
+      <MapSwitcher />
     </Wrapper>
   );
 }

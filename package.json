@@ -5,7 +5,10 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "predev": "npm run fetch-geo",
     "build": "tsc -b && vite build",
+    "prebuild": "npm run fetch-geo",
+    "fetch-geo": "node scripts/fetch-geo.mjs",
     "lint": "eslint .",
     "preview": "vite preview"
   },

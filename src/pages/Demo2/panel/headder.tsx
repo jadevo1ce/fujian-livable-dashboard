@@ -130,7 +130,7 @@ export default function Headder(props: ComponentProps<typeof TitleWrapper>) {
         <SvgComponent />
       </HiddenLegacyFrame>
       <HeaderFrame />
-      <Title>福建省绿色宜居数据大屏</Title>
+      <Title>运营中心城市绿色宜居数据大屏</Title>
     </TitleWrapper>
   );
 }

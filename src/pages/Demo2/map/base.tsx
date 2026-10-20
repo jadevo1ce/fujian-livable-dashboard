@@ -32,7 +32,7 @@ import FlyLine from "./flyLine";
 import Boundary from "./boundary";
 import Label from "./label";
 import { useConfigStore } from "../stores";
-import { cityAtYear, indexColorAt, yearIndexDomain } from "../data";
+import { regionAtYear, indexColorAt, yearIndexDomain } from "../data";
 
 const SELECTED_RISE_MIN = 1.8;
 const SELECTED_RISE_MAX = 3.2;
@@ -42,7 +42,7 @@ const HOVER_RISE_MAX = 1.55;
 const clamp01 = (x: number) => Math.max(0, Math.min(1, x));
 
 const scoreRatioAt = (city: string, year: number) => {
-  const score = cityAtYear(city, year)?.index;
+  const score = regionAtYear(city, year)?.index;
   if (typeof score !== "number") return 0;
 
   const { min, max } = yearIndexDomain(year);
@@ -79,18 +79,52 @@ export interface BaseProps {
   depth?: number;
   data: CityGeoJSON;
   outlineData?: CityGeoJSON;
+  /** 是否使用卫星贴图（市级地图没有配套贴图时传 false，用纯色材质） */
+  textured?: boolean;
   controls?: RefObject<{ target: Vector3; update: () => void } | null>;
 }
 
+// 地图在场景中的统一视觉尺寸：把不同范围（省 / 市）的投影都归一到
+// 相同宽度，切换地图后相机参数无需调整。
+// 注意：不能用 d3 的 fitSize —— DataV 的 GeoJSON 环绕方向会让
+// geoBounds 误判为覆盖全球。这里直接按经纬度包围盒手算缩放。
+const MAP_FIT_SIZE = 10;
+
 export default function Base(props: BaseProps) {
-  const { data, outlineData, depth = 1, controls } = props;
+  const { data, outlineData, depth = 1, textured = true, controls } = props;
   const groupRef = useRef<Group>(null!);
   const camera = useThree((state) => state.camera);
 
   const projection = useMemo(() => {
-    return geoMercator()
-      .center(data.features[0].properties.centroid)
+    // 经纬度包围盒
+    let lonMin = 180,
+      lonMax = -180,
+      latMin = 90,
+      latMax = -90;
+    const walk = (coords: unknown): void => {
+      const arr = coords as number[] | number[][];
+      if (typeof arr[0] === "number") {
+        const [lon, lat] = arr as number[];
+        lonMin = Math.min(lonMin, lon);
+        lonMax = Math.max(lonMax, lon);
+        latMin = Math.min(latMin, lat);
+        latMax = Math.max(latMax, lat);
+      } else {
+        (arr as number[][]).forEach(walk);
+      }
+    };
+    data.features.forEach((f) => walk(f.geometry.coordinates));
+
+    const lon0 = (lonMin + lonMax) / 2;
+    const lat0 = (latMin + latMax) / 2;
+    const base = geoMercator()
+      .center([lon0, lat0])
       .translate([0, 0]);
+    // 墨卡托投影 x 随经度、y 随纬度单调变化，投影包围盒四角即可得到准确尺寸
+    const [x1, y1] = base([lonMin, latMax])!;
+    const [x2, y2] = base([lonMax, latMin])!;
+    const k = MAP_FIT_SIZE / Math.max(Math.abs(x2 - x1), Math.abs(y2 - y1));
+    return base.scale(base.scale() * k);
   }, [data]);
 
   const { regions, bbox, boundary } = useMemo(() => {
@@ -152,6 +186,12 @@ export default function Base(props: BaseProps) {
 
   useLayoutEffect(() => {
     if (!groupRef.current) return;
+    // 切换地图重挂载时，把控制器焦点复位到场景中心（上一张地图可能聚焦过某市）
+    const ctrl = controls?.current;
+    if (ctrl) {
+      ctrl.target.set(0, 0, 0);
+      ctrl.update();
+    }
     const tl = gsap.timeline();
 
     tl.to(camera.position, {
@@ -245,6 +285,7 @@ export default function Base(props: BaseProps) {
               depth={depth}
               bbox={bbox}
               data={region}
+              textured={textured}
             />
           ))}
           {outlineData && (
@@ -265,19 +306,20 @@ export default function Base(props: BaseProps) {
 function City(props: {
   depth: number;
   bbox: Box2;
+  textured: boolean;
   data: {
     name: string;
     center: Vector3;
     points: Vector2[][];
   };
 }) {
-  const { bbox, data, depth } = props;
+  const { bbox, data, depth, textured } = props;
   const materialRef = useRef<ShaderMaterial>(null!);
   const capRef = useRef<MeshStandardMaterial>(null!);
   const groupRef = useRef<Group>(null!);
   const vector3 = useRef(new Vector3(1, 1, 1));
   const [score, setScore] = useState(
-    () => cityAtYear(data.name, useConfigStore.getState().year)?.index ?? 0
+    () => regionAtYear(data.name, useConfigStore.getState().year)?.index ?? 0
   );
   const [tagColor, setTagColor] = useState(() =>
     indexColorAt(score, useConfigStore.getState().year)
@@ -325,7 +367,7 @@ function City(props: {
   // 按当前年份的绿色宜居指数给城市着色（同年内分数越高越亮绿、越低越暗），并刷新标签分数。
   useEffect(() => {
     const apply = (year: number) => {
-      const d = cityAtYear(data.name, year);
+      const d = regionAtYear(data.name, year);
       if (!d) return;
       setScore(d.index);
       const color = indexColorAt(d.index, year);
@@ -364,11 +406,15 @@ function City(props: {
           ref={capRef}
           transparent
           attach="material-0"
-          map={texture}
-          normalMap={normalMap}
-          normalScale={new Vector2(0.35, 0.35)}
-          displacementMap={displacementMap}
-          displacementScale={0.02}
+          {...(textured
+            ? {
+                map: texture,
+                normalMap: normalMap,
+                normalScale: new Vector2(0.35, 0.35),
+                displacementMap: displacementMap,
+                displacementScale: 0.02,
+              }
+            : {})}
           metalness={0.2}
           roughness={0.7}
           side={DoubleSide}

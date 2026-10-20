@@ -72,7 +72,7 @@ export default function Demo2() {
             />
 
             <EffectComposer>
-              <Bloom disableNormalPass luminanceThreshold={2} mipmapBlur />
+              <Bloom luminanceThreshold={2} mipmapBlur />
               <ToneMapping />
             </EffectComposer>
 

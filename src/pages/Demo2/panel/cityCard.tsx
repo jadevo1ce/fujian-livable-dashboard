@@ -6,6 +6,7 @@ import {
   cityColorMap,
   livableDimensions,
   provinceAvgAtYear,
+  regionAtYear,
   type CityYear,
 } from "../data";
 import { useConfigStore } from "../stores";
@@ -252,7 +253,9 @@ export default function CityCard() {
 
   if (selectedCity) lastName.current = selectedCity;
   const name = selectedCity ?? lastName.current;
-  const data: CityYear | null = name ? cityAtYear(name, year) : null;
+  // 九市用真实数据；区县（市级地图下）由 regionAtYear 回退到演示数据。
+  const data: CityYear | null = name ? regionAtYear(name, year) : null;
+  const isPrefecture = name ? !!cityAtYear(name, year) : false;
   const avg = provinceAvgAtYear(year);
   const accent = name ? cityColorMap[name] ?? "#2FC98E" : "#2FC98E";
 
@@ -273,9 +276,11 @@ export default function CityCard() {
 
           <Header>
             <CityName>{name}</CityName>
-            <Rank $accent={accent}>
-              全省第 <b>{rankAt(year, name)}</b> / {citiesAtYear(year).length}
-            </Rank>
+            {isPrefecture && (
+              <Rank $accent={accent}>
+                全省第 <b>{rankAt(year, name)}</b> / {citiesAtYear(year).length}
+              </Rank>
+            )}
             <IndexLine $accent={accent}>
               <b>{data.index}</b>
               <span>绿色宜居指数 · {year} 年</span>

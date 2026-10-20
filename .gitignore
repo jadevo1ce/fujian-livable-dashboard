@@ -25,3 +25,6 @@ back
 *.sw?
 src/assets/sc_specular_map.png
 src/assets/sc_ambient_occlusion_map.png
+
+# 运营中心城市 GeoJSON（由 npm run fetch-geo 自动下载）
+public/geo/

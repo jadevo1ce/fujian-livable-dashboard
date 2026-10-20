@@ -247,3 +247,143 @@ export const indexColorAt = (v: number, year: number) => {
   const hi = max + span * 0.04;
   return scoreToColor(clamp01((v - lo) / (hi - lo)));
 };
+
+// ── 区县级演示数据 ──
+// 切换到地级市地图后，渲染单元是区县（如鼓楼区、晋江市），官方源表只有福建九市
+// 粒度，没有区县真实统计；杭州 / 广州 / 长沙 / 长春连市级真实数据也没有。
+// 这里用「名称 → 确定性伪随机」生成一套稳定的演示指标：同一区域在同一年份的
+// 值固定、围绕其母市基准值小幅波动，保证地图着色、抬升高度、标签数值可正常
+// 展示。接入真实区县数据后删除此段即可。
+
+/** 字符串 → 0~1 确定性哈希（同一名字永远得到同一值）。 */
+const nameHash = (name: string) => {
+  let h = 2166136261;
+  for (let i = 0; i < name.length; i++) {
+    h ^= name.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return ((h >>> 0) % 1000) / 1000;
+};
+
+// 运营中心七城的区县名录（与 DataV GeoJSON 中的区县名严格一致），
+// 用于让区县演示值围绕其母市基准值波动。
+const districtGroups: Array<[string, string]> = [
+  [
+    "泉州市",
+    "鲤城区|丰泽区|洛江区|泉港区|惠安县|安溪县|永春县|德化县|金门县|石狮市|晋江市|南安市",
+  ],
+  ["厦门市", "思明区|海沧区|湖里区|集美区|同安区|翔安区"],
+  [
+    "福州市",
+    "鼓楼区|台江区|仓山区|马尾区|晋安区|长乐区|闽侯县|连江县|罗源县|闽清县|永泰县|平潭县|福清市",
+  ],
+  [
+    "杭州市",
+    "上城区|拱墅区|西湖区|滨江区|萧山区|余杭区|富阳区|临安区|钱塘区|临平区|桐庐县|淳安县|建德市",
+  ],
+  [
+    "广州市",
+    "荔湾区|越秀区|海珠区|天河区|白云区|黄埔区|番禺区|花都区|南沙区|从化区|增城区",
+  ],
+  [
+    "长沙市",
+    "芙蓉区|天心区|岳麓区|开福区|雨花区|望城区|长沙县|浏阳市|宁乡市",
+  ],
+  [
+    "长春市",
+    "南关区|宽城区|朝阳区|二道区|绿园区|双阳区|九台区|农安县|榆树市|德惠市|公主岭市",
+  ],
+];
+
+const districtParentCity = (name: string): string | null => {
+  for (const [parent, pattern] of districtGroups) {
+    if (new RegExp(`^(${pattern})$`).test(name)) return parent;
+  }
+  return null;
+};
+
+/**
+ * 无真实统计数据的城市（杭州 / 广州 / 长沙 / 长春）：
+ * 由城市名哈希生成确定性的市级基准值，并带轻微逐年上升趋势，
+ * 让时间轴播放时地图高度 / 颜色也会缓慢变化。
+ */
+const synthBase = (name: string, year: number): CityYear => {
+  const h = (k: string) => nameHash(name + k);
+  const t = year - years[0]; // 0..n，逐年微增
+  const score = (k: string, g: number) =>
+    Math.max(1, Math.min(100, round(55 + h(k) * 30 + t * g, 1)));
+  const eco = score("eco", 0.8);
+  const health = score("health", 0.7);
+  const education = score("edu", 0.7);
+  const life = score("life", 0.8);
+  const space = score("space", 0.6);
+  return {
+    city: name,
+    year,
+    eco,
+    health,
+    education,
+    life,
+    space,
+    urbanization: Math.max(
+      10,
+      Math.min(100, round(55 + h("urb") * 30 + t * 1.2, 1))
+    ),
+    gdpPerCapita: Math.round((60000 + h("gdp") * 80000) * (1 + t * 0.06)),
+    population: Math.round((400 + h("pop") * 700) * (1 + t * 0.015)),
+    density: Math.round(400 + h("den") * 1200),
+    index: round(
+      eco * 0.3 + health * 0.2 + education * 0.2 + life * 0.2 + space * 0.1
+    ),
+  };
+};
+
+/**
+ * 任意区域（市 / 区县）在指定年份的指标：
+ * 福建九市返回真实数据；杭州 / 广州 / 长沙 / 长春返回合成的市级基准值；
+ * 区县返回围绕母市基准值波动的确定性演示数据。
+ */
+export const regionAtYear = (name: string, year: number): CityYear | null => {
+  const real = cityAtYear(name, year);
+  if (real) return real;
+
+  const parentName = districtParentCity(name);
+  const parent = parentName
+    ? (cityAtYear(parentName, year) ?? synthBase(parentName, year))
+    : null;
+  if (!parent) return null;
+
+  const h = nameHash(name);
+  // 围绕母市取值 ±8 波动，并做 0~100 截断。
+  const jitter = (v: number, k: number) =>
+    Math.max(1, Math.min(100, round(v + (nameHash(name + k) - 0.5) * 16, 1)));
+
+  const demo: CityYear = {
+    city: name,
+    year,
+    eco: jitter(parent.eco, 1),
+    health: jitter(parent.health, 2),
+    education: jitter(parent.education, 3),
+    life: jitter(parent.life, 4),
+    space: jitter(parent.space, 5),
+    urbanization: Math.max(
+      10,
+      Math.min(100, round(parent.urbanization + (h - 0.5) * 20, 1))
+    ),
+    gdpPerCapita: Math.max(
+      10000,
+      Math.round(parent.gdpPerCapita * (0.7 + h * 0.6))
+    ),
+    population: Math.max(10, Math.round(parent.population / 8)),
+    density: Math.max(100, round(parent.density * (0.6 + h), 0)),
+    index: 0,
+  };
+  demo.index = round(
+    demo.eco * 0.3 +
+      demo.health * 0.2 +
+      demo.education * 0.2 +
+      demo.life * 0.2 +
+      demo.space * 0.1
+  );
+  return demo;
+};
